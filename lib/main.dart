@@ -11,7 +11,7 @@ class ChowafaApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Chowafa - Oracle',
+      title: 'ChowafaGpt',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,

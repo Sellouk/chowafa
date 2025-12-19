@@ -1,6 +1,6 @@
 {
-    "name": "chowafa",
-    "short_name": "chowafa",
+    "name": "ChowafaGpt",
+    "short_name": "ChowafaGpt",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

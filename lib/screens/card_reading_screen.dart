@@ -18,8 +18,14 @@ class _CardReadingScreenState extends State<CardReadingScreen>
   final CardService _cardService = CardService();
   final PredictionService _predictionService = PredictionService();
   final AudioPlayer _audioPlayer = AudioPlayer();
+  final AudioPlayer _buttonClickPlayer = AudioPlayer();
   Timer? _glitchTimer;
   final Random _random = Random();
+  
+  // Scroll controller for prediction text
+  final ScrollController _predictionScrollController = ScrollController();
+  bool _canScrollMore = false;
+  bool _hasCheckedScroll = false;
 
   List<String> _selectedCards = [];
   String _prediction = '';
@@ -52,6 +58,9 @@ class _CardReadingScreenState extends State<CardReadingScreen>
       parent: _shuffleController,
       curve: Curves.easeInOut,
     );
+    
+    // Listen to scroll position to hide scroll indicator when at bottom
+    _predictionScrollController.addListener(_onPredictionScroll);
   }
 
   @override
@@ -60,6 +69,9 @@ class _CardReadingScreenState extends State<CardReadingScreen>
     _spreadController.dispose();
     _glitchTimer?.cancel();
     _audioPlayer.dispose();
+    _buttonClickPlayer.dispose();
+    _predictionScrollController.removeListener(_onPredictionScroll);
+    _predictionScrollController.dispose();
     super.dispose();
   }
 
@@ -95,6 +107,40 @@ class _CardReadingScreenState extends State<CardReadingScreen>
   void _stopGlitchAnimation() {
     _glitchTimer?.cancel();
     _glitchTimer = null;
+  }
+
+  Future<void> _playButtonClick() async {
+    try {
+      await _buttonClickPlayer.play(AssetSource('sound/button_click.mp3'));
+    } catch (e) {
+      debugPrint('Button click sound error: $e');
+    }
+  }
+
+  void _onPredictionScroll() {
+    if (_predictionScrollController.hasClients) {
+      final maxScroll = _predictionScrollController.position.maxScrollExtent;
+      final currentScroll = _predictionScrollController.offset;
+      final canScroll = currentScroll < maxScroll - 10; // 10px threshold
+      
+      if (canScroll != _canScrollMore) {
+        setState(() {
+          _canScrollMore = canScroll;
+        });
+      }
+    }
+  }
+
+  void _checkIfScrollable() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_predictionScrollController.hasClients && mounted) {
+        final maxScroll = _predictionScrollController.position.maxScrollExtent;
+        setState(() {
+          _canScrollMore = maxScroll > 10; // Has content to scroll
+          _hasCheckedScroll = true;
+        });
+      }
+    });
   }
 
   Future<void> _splitCards() async {
@@ -133,7 +179,11 @@ class _CardReadingScreenState extends State<CardReadingScreen>
     await Future.delayed(const Duration(milliseconds: 1500));
     setState(() {
       _showPrediction = true;
+      _hasCheckedScroll = false;
     });
+    
+    // Check if prediction text needs scrolling
+    _checkIfScrollable();
   }
 
   void _reset() {
@@ -151,6 +201,8 @@ class _CardReadingScreenState extends State<CardReadingScreen>
       _isScaryMode = false;
       _glitchX = 0;
       _glitchY = 0;
+      _canScrollMore = false;
+      _hasCheckedScroll = false;
     });
   }
 
@@ -431,7 +483,6 @@ class _CardReadingScreenState extends State<CardReadingScreen>
       duration: const Duration(milliseconds: 800),
       child: Container(
         margin: const EdgeInsets.only(top: 16, left: 8, right: 8, bottom: 8),
-        padding: const EdgeInsets.all(16),
         constraints: const BoxConstraints(maxHeight: 250),
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -453,16 +504,59 @@ class _CardReadingScreenState extends State<CardReadingScreen>
             ),
           ],
         ),
-        child: SingleChildScrollView(
-          child: Text(
-            _prediction,
-            textAlign: TextAlign.center,
-            textDirection: TextDirection.rtl,
-            style: const TextStyle(
-              fontSize: 15,
-              color: Color(0xFFE8D5B7),
-              height: 1.7,
-            ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(15),
+          child: Stack(
+            children: [
+              // Scrollable text content
+              SingleChildScrollView(
+                controller: _predictionScrollController,
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  _prediction,
+                  textAlign: TextAlign.center,
+                  textDirection: TextDirection.rtl,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    color: Color(0xFFE8D5B7),
+                    height: 1.7,
+                  ),
+                ),
+              ),
+              
+              // Scroll indicator overlay (fade + arrow)
+              if (_canScrollMore && _hasCheckedScroll)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Gradient fade effect
+                      Container(
+                        height: 40,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              const Color(0xFF1A1A2E).withValues(alpha: 0.0),
+                              const Color(0xFF1A1A2E).withValues(alpha: 0.95),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // Bouncing arrow indicator
+                      Container(
+                        color: const Color(0xFF1A1A2E).withValues(alpha: 0.95),
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _BouncingArrow(),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
           ),
         ),
       ),
@@ -471,7 +565,10 @@ class _CardReadingScreenState extends State<CardReadingScreen>
 
   Widget _buildSplitButton() {
     return GestureDetector(
-      onTap: _isShuffling ? null : _splitCards,
+      onTap: _isShuffling ? null : () {
+        _playButtonClick();
+        _splitCards();
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         padding: const EdgeInsets.symmetric(
@@ -525,7 +622,10 @@ class _CardReadingScreenState extends State<CardReadingScreen>
 
   Widget _buildReadAgainButton() {
     return GestureDetector(
-      onTap: _reset,
+      onTap: () {
+        _playButtonClick();
+        _reset();
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 500),
         padding: const EdgeInsets.symmetric(
@@ -581,6 +681,59 @@ class _CardReadingScreenState extends State<CardReadingScreen>
           ],
         ),
       ),
+    );
+  }
+}
+
+// Animated bouncing arrow widget to indicate scrollable content
+class _BouncingArrow extends StatefulWidget {
+  @override
+  State<_BouncingArrow> createState() => _BouncingArrowState();
+}
+
+class _BouncingArrowState extends State<_BouncingArrow>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    )..repeat(reverse: true);
+    
+    _animation = Tween<double>(begin: 0, end: 6).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Transform.translate(
+          offset: Offset(0, _animation.value),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.keyboard_arrow_down,
+                color: const Color(0xFFD4AF37).withValues(alpha: 0.8),
+                size: 24,
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
